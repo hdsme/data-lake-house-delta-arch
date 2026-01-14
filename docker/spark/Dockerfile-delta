@@ -1,0 +1,76 @@
+FROM apache/spark:3.3.3-scala2.12-java11-python3-ubuntu
+
+USER root
+WORKDIR ${SPARK_HOME}
+ENV PATH="/opt/spark/sbin:/opt/spark/bin:${PATH}"
+
+# --- 1. CONFIG VERSIONS ---
+# Delta 2.2.0 is compatible with Spark 3.3.x
+ENV SPARK_VERSION=3.3.3
+ENV DELTA_VERSION=2.2.0
+ENV AWS_SDK_VERSION=1.12.262
+ENV HADOOP_AWS_VERSION=3.3.2
+ENV KAFKA_CLIENT_VERSION=3.3.2
+
+# --- 2. INSTALL SYSTEM DEPENDENCIES ---
+RUN apt-get update -y && \
+    apt-get install -y curl wget git zsh python3-pip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- 3. DOWNLOAD JARS FOR S3 & MINIO SUPPORT ---
+# Hadoop AWS & AWS SDK Bundle
+RUN curl https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/hadoop-aws-${HADOOP_AWS_VERSION}.jar
+
+RUN curl https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar
+
+# --- 4. DOWNLOAD JARS FOR DELTA LAKE SUPPORT ---
+# Delta Core
+RUN curl https://repo1.maven.org/maven2/io/delta/delta-core_2.12/${DELTA_VERSION}/delta-core_2.12-${DELTA_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/delta-core_2.12-${DELTA_VERSION}.jar
+
+# Delta Storage
+RUN curl https://repo1.maven.org/maven2/io/delta/delta-storage/${DELTA_VERSION}/delta-storage-${DELTA_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/delta-storage-${DELTA_VERSION}.jar
+
+# --- 5. DOWNLOAD JARS FOR KAFKA STREAMING SUPPORT ---
+# Spark SQL Kafka (Required for reading from Debezium/Kafka)
+RUN curl https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/${KAFKA_CLIENT_VERSION}/spark-sql-kafka-0-10_2.12-${KAFKA_CLIENT_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/spark-sql-kafka-0-10_2.12-${KAFKA_CLIENT_VERSION}.jar
+
+# Spark Token Provider Kafka
+RUN curl https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/${KAFKA_CLIENT_VERSION}/spark-token-provider-kafka-0-10_2.12-${KAFKA_CLIENT_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/spark-token-provider-kafka-0-10_2.12-${KAFKA_CLIENT_VERSION}.jar
+
+# Kafka Clients (Dependencies for spark-sql-kafka)
+RUN curl https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/${KAFKA_CLIENT_VERSION}/kafka-clients-${KAFKA_CLIENT_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/kafka-clients-${KAFKA_CLIENT_VERSION}.jar
+
+# Commons Pool (Required by Kafka)
+RUN curl https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar \
+    -o ${SPARK_HOME}/jars/commons-pool2-2.11.1.jar
+
+# --- 6. CONFIGURE PYTHON & JUPYTER ---
+ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.5-src.zip:$PYTHONPATH
+
+# Copy requirements file (Ensure this file exists in your build context)
+COPY ./docker/jupyter/requirements.txt /opt/requirements.txt
+RUN pip3 install --no-cache-dir -r /opt/requirements.txt
+
+# Jupyter Configuration
+COPY ./docker/jupyter/jupyter_server_config.py /root/.jupyter/
+# Ensure the directory exists before copying themes
+RUN mkdir -p /root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/
+COPY ./docker/jupyter/themes.jupyterlab-settings /root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/
+
+# --- 7. CONFIGURE ZSH (Optional Developer Experience) ---
+RUN wget https://github.com/robbyrussell/oh-my-zsh/raw/master/tools/install.sh -O - | zsh || true
+ENV TERM xterm
+ENV ZSH_THEME robbyrussell
+RUN chsh -s /usr/bin/zsh
+
+# --- 8. ENTRYPOINT ---
+# Keep tail -f to run as a long-running service for Jupyter or submit jobs manually
+ENTRYPOINT ["tail", "-f", "/dev/null"]

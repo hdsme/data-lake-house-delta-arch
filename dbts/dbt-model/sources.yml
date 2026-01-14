@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: silver
+    database: delta      # Catalog name
+    schema: default      # Schema chứa bảng silver (check lại spark job ghi vào schema nào, thường là default hoặc silver)
+    tables:
+      - name: orders     # Tên bảng vật lý trên MinIO

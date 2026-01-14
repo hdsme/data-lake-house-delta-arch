@@ -1,0 +1,15 @@
+data_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: none
+      user: admin
+      password:
+      host: 192.168.2.125
+      port: 8889
+      catalog: delta
+      schema: gold
+      threads: 1
+      client_tags:
+        - dbt

@@ -1,0 +1,568 @@
+version: "3.9"
+
+# Configure modules
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.7.0-python3.10
+  environment:
+    &airflow-common-env
+    S3_ENDPOINT: http://minio:9000
+    S3_ACCESS_KEY: minio
+    S3_SECRET_KEY: minio123
+    S3_PATH_STYLE_ACCESS: "true"
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: false
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Seoul
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+    AIRFLOW_UID: '50000'
+    _AIRFLOW_WWW_USER_USERNAME: airflow
+    _AIRFLOW_WWW_USER_PASSWORD: airflow
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow==2.7.0 dbt-core dbt-trino trino airflow-dbt apache-airflow-providers-apache-spark
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./dbts:/opt/airflow/dbts
+    # - ./docker/airflow/config:/opt/airflow/config
+    # - ./docker/airflow/plugins:/opt/airflow/plugins
+    # - ./docker/volume/airflow/logs:/opt/airflow/logs
+  user: "50000"
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+# Configure services
+services:
+
+  ####################################################################################################
+  # Storages
+  ####################################################################################################
+  postgres:
+    container_name: postgres
+    hostname: postgres
+    image: postgres:11
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./docker/volume/postgres:/var/lib/postgresql/data
+      - ./docker/postgres/init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    networks:
+      - lakehouse_network
+
+  minio:
+    container_name: minio
+    hostname: minio
+    image: 'minio/minio'
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+      MINIO_DOMAIN: minio
+    command: server /data --console-address ":9001"
+    networks:
+      - lakehouse_network
+
+  minio-job:
+    image: 'minio/mc'
+    container_name: minio-job
+    hostname: minio-job
+    entrypoint: |
+      /bin/bash -c "
+      sleep 5;
+      /usr/bin/mc config --quiet host add myminio http://minio:9000 minio minio123 || true;
+      /usr/bin/mc mb --quiet myminio/datalake || true;
+      "
+    environment:
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PATH_STYLE_ACCESS=true
+    depends_on:
+      - minio
+    networks:
+      - lakehouse_network
+
+  hive-metastore:
+    container_name: hive-metastore
+    hostname: hive-metastore
+    build:
+      dockerfile: ./docker/hive-metastore/Dockerfile
+    image: 1ambda/lakehouse:hive-metastore-3.1.2
+    ports:
+      - '9083:9083' # Metastore Thrift
+    environment:
+      HIVE_METASTORE_DRIVER: org.postgresql.Driver
+      HIVE_METASTORE_JDBC_URL: jdbc:postgresql://postgres:5432/metastore
+      HIVE_METASTORE_USER: hive
+      HIVE_METASTORE_PASSWORD: hive
+      HIVE_METASTORE_WAREHOUSE_DIR: s3://datalake/
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_PATH_STYLE_ACCESS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lakehouse_network
+
+  ####################################################################################################
+  # Trino
+  ####################################################################################################
+  trino:
+    profiles: [ "trino" ]
+    container_name: trino
+    hostname: trino
+    # build:
+    #   dockerfile: Dockerfile.Trino
+    image: "trinodb/trino:425"
+    restart: always
+    ports:
+      - "8889:8889"
+    volumes:
+      - ./docker/trino/etc-coordinator:/etc/trino
+      - ./docker/trino/catalog:/etc/trino/catalog
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8889/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - hive-metastore
+    networks:
+      - lakehouse_network
+
+  trino-worker:
+    profiles: [ "trino-worker" ]
+    container_name: trino-worker
+    hostname: trino-worker
+    # build:
+    #   dockerfile: Dockerfile.TrinoWorker
+    image: "trinodb/trino:425"
+    restart: always
+    volumes:
+      - ./docker/trino/etc-worker:/etc/trino
+      - ./docker/trino/catalog:/etc/trino/catalog
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8889/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - trino
+    networks:
+      - lakehouse_network
+
+  ####################################################################################################
+  # Spark
+  ####################################################################################################
+  # spark-iceberg:
+  #   profiles: [ "spark-iceberg" ]
+  #   build:
+  #     dockerfile: ./docker/spark/Dockerfile-spark3.4
+  #   image: 1ambda/lakehouse:spark-3.4
+  #   container_name: spark-iceberg
+  #   hostname: spark-iceberg
+  #   entrypoint: |
+  #     /bin/bash -c "
+  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
+  #     "
+  #   ports:
+  #     - "4040:4040"
+  #     - "8900:8888"
+  #   depends_on:
+  #     - minio
+  #     - hive-metastore
+  #   environment:
+  #     - AWS_ACCESS_KEY_ID=minio
+  #     - AWS_SECRET_ACCESS_KEY=minio123
+  #     - AWS_REGION=us-east-1
+  #     - AWS_DEFAULT_REGION=us-east-1
+  #     - S3_ENDPOINT=http://minio:9000
+  #     - S3_PATH_STYLE_ACCESS=true
+
+  #   volumes:
+  #     - ./notebook:/opt/notebook
+  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
+  #     - ./docker/spark/spark-defaults-iceberg.conf:/opt/spark/conf/spark-defaults.conf
+  #   networks:
+  #     - lakehouse_network
+
+  # spark-hudi:
+  #   profiles: [ "spark-hudi" ]
+  #   build:
+  #     dockerfile: ./docker/spark/Dockerfile-spark3.3
+  #   image: 1ambda/lakehouse:spark-3.3
+  #   container_name: spark-hudi
+  #   hostname: spark-hudi
+  #   entrypoint: |
+  #     /bin/bash -c "
+  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
+  #     "
+  #   ports:
+  #     - "4041:4040"
+  #     - "8901:8888"
+  #   depends_on:
+  #     - minio
+  #     - hive-metastore
+  #   environment:
+  #     - AWS_ACCESS_KEY_ID=minio
+  #     - AWS_SECRET_ACCESS_KEY=minio123
+  #     - AWS_REGION=us-east-1
+  #     - AWS_DEFAULT_REGION=us-east-1
+  #     - S3_ENDPOINT=http://minio:9000
+  #     - S3_PATH_STYLE_ACCESS=true
+  #     - HOODIE_ENV_fs_DOT_s3a_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+  #     - HOODIE_ENV_fs_DOT_s3a_DOT_access_DOT_key=minio;
+  #     - HOODIE_ENV_fs_DOT_s3a_DOT_awsSecretAccessKey=minio;
+  #     - HOODIE_ENV_fs_DOT_s3a_DOT_endpoint=http://minio:9000;
+  #     - HOODIE_ENV_fs_DOT_s3a_DOT_path_DOT_style_DOT_access=true;
+  #     - HOODIE_ENV_fs_DOT_s3_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+  #     - HOODIE_ENV_fs_DOT_s3_DOT_access_DOT_key=minio;
+  #     - HOODIE_ENV_fs_DOT_s3_DOT_awsSecretAccessKey=minio;
+  #     - HOODIE_ENV_fs_DOT_s3_DOT_endpoint=http://minio:9000;
+  #     - HOODIE_ENV_fs_DOT_s3_DOT_path_DOT_style_DOT_access=true;
+  #     - HUDI_CONF_DIR=/opt/hudi/conf
+
+  #   volumes:
+  #     - ./notebook:/opt/notebook
+  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
+  #     - ./docker/spark/spark-defaults-hudi.conf:/opt/spark/conf/spark-defaults.conf
+  #     - ./docker/spark/hudi-defaults.conf:/opt/hudi/conf/hudi-defaults.conf
+  #   networks:
+  #     - lakehouse_network
+
+  # spark-delta:
+  #   profiles: [ "spark-delta" ]
+  #   build:
+  #     context: .
+  #     # Đảm bảo bạn đã lưu nội dung Dockerfile tôi cung cấp ở bước trước vào đường dẫn này
+  #     dockerfile: ./docker/spark/Dockerfile-delta 
+  #   image: katinat/lakehouse:spark-delta-3.3
+  #   container_name: spark-delta
+  #   hostname: spark-delta
+  #   # Chạy Jupyter Lab làm môi trường Interactive Development
+  #   entrypoint: |
+  #     /bin/bash -c "
+  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
+  #     "
+  #   ports:
+  #     - "4042:4040"  # Spark UI (Port khác spark-hudi 4041)
+  #     - "8902:8888"  # Jupyter Lab (Port khác spark-hudi 8901)
+  #   depends_on:
+  #     - minio
+  #     - hive-metastore
+  #   environment:
+  #     # --- AWS / MinIO Connection Config ---
+  #     - AWS_ACCESS_KEY_ID=minio
+  #     - AWS_SECRET_ACCESS_KEY=minio123
+  #     - AWS_REGION=us-east-1
+  #     - AWS_DEFAULT_REGION=us-east-1
+  #     - S3_ENDPOINT=http://minio:9000
+  #     - S3_PATH_STYLE_ACCESS=true
+      
+  #     # --- Spark Runtime Config ---
+  #     - SPARK_MODE=master
+  #     # Tắt các security feature không cần thiết cho môi trường dev/local để tránh lỗi connection
+  #     - SPARK_RPC_AUTHENTICATION_ENABLED=no
+  #     - SPARK_RPC_ENCRYPTION_ENABLED=no
+  #     - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+  #     - SPARK_SSL_ENABLED=no
+  #   volumes:
+  #     # Mount thư mục notebook để code không mất khi restart container
+  #     - ./notebook:/opt/notebook
+  #     # Mount config Jupyter (nếu bạn dùng chung config với hudi)
+  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
+  #   networks:
+  #     - lakehouse_network
+  ####################################################################################################
+  # Flink
+  ####################################################################################################
+  flink-jobmanager:
+    profiles: [ "flink" ]
+    build:
+      dockerfile: ./docker/flink/Dockerfile-flink1.16
+    image: 1ambda/lakehouse:flink-1.16
+    container_name: flink-jobmanager
+    hostname: flink-jobmanager
+    entrypoint: |
+      /bin/bash -c "
+      export HADOOP_CLASSPATH=`/opt/hadoop/bin/hadoop classpath`;
+      /docker-entrypoint.sh jobmanager;
+      "
+
+    working_dir: /opt/flink
+    ports:
+      - "8082:8081"
+      - "6123:6123"
+
+    environment:
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PATH_STYLE_ACCESS=true
+      - |
+        FLINK_PROPERTIES=
+        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        fs.s3a.access.key: minio
+        fs.s3a.secret.key: minio123
+        fs.s3a.endpoint: http://minio:9000
+        fs.s3a.path.style.access: true
+        jobmanager.rpc.address: flink-jobmanager
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3a://datalake/flink/cluster-common/checkpoints/
+        state.savepoints.dir: s3a://datalake/flink/cluster-common/savepoints/
+
+    volumes:
+      - ./docker/flink/hadoop-core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+      - ./docker/flink/hadoop-hive-site.xml:/opt/flink/conf/hive-site.xml
+      - ./docker/flink/flink-sql-hudi.sh:/opt/flink-client/flink-sql-hudi
+      - ./docker/flink/flink-init-hudi.sql:/opt/flink-client/flink-init-hudi.sql
+      - ./docker/flink/flink-sql-iceberg.sh:/opt/flink-client/flink-sql-iceberg
+      - ./docker/flink/flink-init-iceberg.sql:/opt/flink-client/flink-init-iceberg.sql
+    networks:
+      - lakehouse_network
+
+  flink-taskmanager:
+    profiles: [ "flink" ]
+    build:
+      dockerfile: ./docker/flink/Dockerfile-flink1.16
+    image: 1ambda/lakehouse:flink-1.16
+    container_name: flink-taskmanager
+    hostname: flink-taskmanager
+    entrypoint: |
+      /bin/bash -c "
+      export HADOOP_CLASSPATH=`/opt/hadoop//bin/hadoop classpath`;
+      /docker-entrypoint.sh taskmanager;
+      "
+    working_dir: /opt/flink
+    environment:
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PATH_STYLE_ACCESS=true
+      - |
+        FLINK_PROPERTIES=
+        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        fs.s3a.access.key: minio
+        fs.s3a.secret.key: minio123
+        fs.s3a.endpoint: http://minio:9000
+        fs.s3a.path.style.access: true
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 8
+        parallelism.default: 1
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3a://datalake/flink/cluster-common/checkpoints/
+        state.savepoints.dir: s3a://datalake/flink/cluster-common/savepoints/
+
+    volumes:
+        - ./docker/flink/hadoop-core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+        - ./docker/flink/hadoop-hive-site.xml:/opt/flink/conf/hive-site.xml
+    depends_on:
+      - flink-jobmanager
+    networks:
+      - lakehouse_network
+
+  ####################################################################################################
+  # Airflow
+  ####################################################################################################
+  airflow-webserver:
+    <<: *airflow-common
+    profiles: [ "airflow" ]
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      # airflow-init:
+      #   condition: service_completed_successfully
+    networks:
+      - lakehouse_network
+
+  airflow-scheduler:
+    <<: *airflow-common
+    profiles: [ "airflow" ]
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8974/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      # airflow-init:
+      #   condition: service_completed_successfully
+    networks:
+      - lakehouse_network
+
+  airflow-worker:
+    <<: *airflow-common
+    profiles: [ "airflow" ]
+    container_name: airflow-worker
+    hostname: airflow-worker
+    command: celery worker
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
+      HOSTNAME: ${HOSTNAME:-airflow-worker}
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      
+      # airflow-init:
+      #   condition: service_completed_successfully
+    networks:
+      - lakehouse_network
+      
+  airflow-triggerer:
+    <<: *airflow-common
+    profiles: [ "airflow" ]
+    container_name: airflow-triggerer
+    command: triggerer
+    healthcheck:
+      test: [ "CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"' ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-cli:
+    <<: *airflow-common
+    container_name: airflow-cli
+    profiles: [ "airflow-debug" ]
+    environment:
+      <<: *airflow-common-env
+      CONNECTION_CHECK_MAX_COUNT: "0"
+    # Workaround for entrypoint issue. See: https://github.com/apache/airflow/issues/16252
+    command:
+      - bash
+      - -c
+      - airflow
+    networks:
+      - lakehouse_network
+
+  airflow-init:
+    <<: *airflow-common
+    profiles: [ "airflow" ]
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    # yamllint disable rule:line-length
+    command:
+      - -c
+      - |
+        mkdir -p /sources/logs /sources/dags /sources/plugins
+        chown -R "50000:0" /sources/{logs,dags,plugins}
+        exec /entrypoint airflow version
+    # yamllint enable rule:line-length
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _PIP_ADDITIONAL_REQUIREMENTS: ''
+    user: "0:0"
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}:/sources
+    networks:
+      - lakehouse_network
+
+  redis:
+    profiles: [ "airflow" ]
+    container_name: redis
+    hostname: redis
+    image: redis:latest
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+    restart: always
+    networks:
+      - lakehouse_network
+
+  superset:
+    build:
+      dockerfile: Dockerfile.Supreset
+    image: apache/superset:latest
+    ports:
+      - "8089:8088"
+    environment:
+      - SUPERSET_LOAD_EXAMPLES=yes
+      - SUPERSET_SECRET_KEY=W8R8kzCzPz8vYcZ7n8LZxQvX2Zp9mF2ZyQZk9KpN7k4=
+      - SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://superset:superset@postgres:5432/superset
+      - PYPI_PACKAGES=sqlalchemy-trino trino
+    volumes:
+      - ./docker/superset/requirements-local.txt:/app/docker/requirements-local.txt
+    user: root
+    command: >
+      /bin/bash -c "
+      superset db upgrade && superset init && superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin && \
+      /app/docker/docker-bootstrap.sh app
+      "
+    
+    # depends_on:
+    #   - trino
+    networks:
+      - lakehouse_network
+
+# Configure Network
+networks:
+  lakehouse_network:
+    name: lakehouse_network
+    driver: bridge

@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: fact_orders
+    description: "Bảng Fact chứa thông tin đơn hàng đã hoàn tất"
+    +table_type: external
+    columns:
+      - name: order_id
+        description: "Primary key của đơn hàng"
+        tests:
+          - unique
+          - not_null
+
+      - name: order_code
+        tests:
+          - not_null
+
+      - name: total_amount
+        description: "Tổng tiền đơn hàng trước VAT"
+        tests:
+          - not_null

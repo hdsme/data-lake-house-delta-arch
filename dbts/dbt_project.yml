@@ -1,0 +1,37 @@
+name: 'data_lakehouse'
+version: '1.0.0'
+config-version: 2
+
+profile: 'data_lakehouse'
+
+model-paths: ["dbt-model"]
+analysis-paths: ["dbt-analysis"]
+test-paths: ["dbt-test"]
+seed-paths: ["dbt-seed"]
+macro-paths: ["dbt-macro"]
+snapshot-paths: ["dbt-snapshot"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  data_lakehouse:
+    staging:
+      # Dùng VIEW cho Staging để nhẹ gánh cho Trino (Không tốn RAM ghi file)
+      +materialized: view
+      +view_security: invoker
+      +schema: staging
+    
+    marts:
+      # Gold Layer nên là TABLE để query nhanh
+      +materialized: table
+      +schema: gold
+      +table_type: delta
+      
+      # Cấu hình tối ưu Resource cho Delta Lake (Session Properties)
+      +dbt_trino:
+        session_properties:
+          # Tắt tính năng tự động scale writer (ngốn RAM)
+          scale_writers: false
+          # Giới hạn kích thước buffer ghi
+          writer_min_size: '16MB' 

@@ -1,0 +1,35 @@
+{
+  "name": "project-orders-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "postgres_ecommerce",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "OOD_CORE",
+
+    "topic.prefix": "cdc.order",
+
+    "plugin.name": "pgoutput",
+    "slot.name": "cdc_orders_slot",
+    "publication.name": "cdc_orders_pub",
+
+    "table.include.list": "public.AbpOrders",
+
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+
+    "decimal.handling.mode": "string",
+    "time.precision.mode": "connect",
+
+    "tombstones.on.delete": "false",
+    "heartbeat.interval.ms": "10000",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}
