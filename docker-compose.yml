@@ -180,149 +180,23 @@ services:
   ####################################################################################################
   # Spark
   ####################################################################################################
-  # spark-iceberg:
-  #   profiles: [ "spark-iceberg" ]
-  #   build:
-  #     dockerfile: ./docker/spark/Dockerfile-spark3.4
-  #   image: 1ambda/lakehouse:spark-3.4
-  #   container_name: spark-iceberg
-  #   hostname: spark-iceberg
-  #   entrypoint: |
-  #     /bin/bash -c "
-  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
-  #     "
-  #   ports:
-  #     - "4040:4040"
-  #     - "8900:8888"
-  #   depends_on:
-  #     - minio
-  #     - hive-metastore
-  #   environment:
-  #     - AWS_ACCESS_KEY_ID=minio
-  #     - AWS_SECRET_ACCESS_KEY=minio123
-  #     - AWS_REGION=us-east-1
-  #     - AWS_DEFAULT_REGION=us-east-1
-  #     - S3_ENDPOINT=http://minio:9000
-  #     - S3_PATH_STYLE_ACCESS=true
-
-  #   volumes:
-  #     - ./notebook:/opt/notebook
-  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
-  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
-  #     - ./docker/spark/spark-defaults-iceberg.conf:/opt/spark/conf/spark-defaults.conf
-  #   networks:
-  #     - lakehouse_network
-
-  # spark-hudi:
-  #   profiles: [ "spark-hudi" ]
-  #   build:
-  #     dockerfile: ./docker/spark/Dockerfile-spark3.3
-  #   image: 1ambda/lakehouse:spark-3.3
-  #   container_name: spark-hudi
-  #   hostname: spark-hudi
-  #   entrypoint: |
-  #     /bin/bash -c "
-  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
-  #     "
-  #   ports:
-  #     - "4041:4040"
-  #     - "8901:8888"
-  #   depends_on:
-  #     - minio
-  #     - hive-metastore
-  #   environment:
-  #     - AWS_ACCESS_KEY_ID=minio
-  #     - AWS_SECRET_ACCESS_KEY=minio123
-  #     - AWS_REGION=us-east-1
-  #     - AWS_DEFAULT_REGION=us-east-1
-  #     - S3_ENDPOINT=http://minio:9000
-  #     - S3_PATH_STYLE_ACCESS=true
-  #     - HOODIE_ENV_fs_DOT_s3a_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
-  #     - HOODIE_ENV_fs_DOT_s3a_DOT_access_DOT_key=minio;
-  #     - HOODIE_ENV_fs_DOT_s3a_DOT_awsSecretAccessKey=minio;
-  #     - HOODIE_ENV_fs_DOT_s3a_DOT_endpoint=http://minio:9000;
-  #     - HOODIE_ENV_fs_DOT_s3a_DOT_path_DOT_style_DOT_access=true;
-  #     - HOODIE_ENV_fs_DOT_s3_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
-  #     - HOODIE_ENV_fs_DOT_s3_DOT_access_DOT_key=minio;
-  #     - HOODIE_ENV_fs_DOT_s3_DOT_awsSecretAccessKey=minio;
-  #     - HOODIE_ENV_fs_DOT_s3_DOT_endpoint=http://minio:9000;
-  #     - HOODIE_ENV_fs_DOT_s3_DOT_path_DOT_style_DOT_access=true;
-  #     - HUDI_CONF_DIR=/opt/hudi/conf
-
-  #   volumes:
-  #     - ./notebook:/opt/notebook
-  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
-  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
-  #     - ./docker/spark/spark-defaults-hudi.conf:/opt/spark/conf/spark-defaults.conf
-  #     - ./docker/spark/hudi-defaults.conf:/opt/hudi/conf/hudi-defaults.conf
-  #   networks:
-  #     - lakehouse_network
-
-  # spark-delta:
-  #   profiles: [ "spark-delta" ]
-  #   build:
-  #     context: .
-  #     # Đảm bảo bạn đã lưu nội dung Dockerfile tôi cung cấp ở bước trước vào đường dẫn này
-  #     dockerfile: ./docker/spark/Dockerfile-delta 
-  #   image: katinat/lakehouse:spark-delta-3.3
-  #   container_name: spark-delta
-  #   hostname: spark-delta
-  #   # Chạy Jupyter Lab làm môi trường Interactive Development
-  #   entrypoint: |
-  #     /bin/bash -c "
-  #     jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
-  #     "
-  #   ports:
-  #     - "4042:4040"  # Spark UI (Port khác spark-hudi 4041)
-  #     - "8902:8888"  # Jupyter Lab (Port khác spark-hudi 8901)
-  #   depends_on:
-  #     - minio
-  #     - hive-metastore
-  #   environment:
-  #     # --- AWS / MinIO Connection Config ---
-  #     - AWS_ACCESS_KEY_ID=minio
-  #     - AWS_SECRET_ACCESS_KEY=minio123
-  #     - AWS_REGION=us-east-1
-  #     - AWS_DEFAULT_REGION=us-east-1
-  #     - S3_ENDPOINT=http://minio:9000
-  #     - S3_PATH_STYLE_ACCESS=true
-      
-  #     # --- Spark Runtime Config ---
-  #     - SPARK_MODE=master
-  #     # Tắt các security feature không cần thiết cho môi trường dev/local để tránh lỗi connection
-  #     - SPARK_RPC_AUTHENTICATION_ENABLED=no
-  #     - SPARK_RPC_ENCRYPTION_ENABLED=no
-  #     - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-  #     - SPARK_SSL_ENABLED=no
-  #   volumes:
-  #     # Mount thư mục notebook để code không mất khi restart container
-  #     - ./notebook:/opt/notebook
-  #     # Mount config Jupyter (nếu bạn dùng chung config với hudi)
-  #     - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
-  #     - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
-  #   networks:
-  #     - lakehouse_network
-  ####################################################################################################
-  # Flink
-  ####################################################################################################
-  flink-jobmanager:
-    profiles: [ "flink" ]
+  spark-iceberg:
+    profiles: [ "spark-iceberg" ]
     build:
-      dockerfile: ./docker/flink/Dockerfile-flink1.16
-    image: 1ambda/lakehouse:flink-1.16
-    container_name: flink-jobmanager
-    hostname: flink-jobmanager
+      dockerfile: ./docker/spark/Dockerfile-spark3.4
+    image: 1ambda/lakehouse:spark-3.4
+    container_name: spark-iceberg
+    hostname: spark-iceberg
     entrypoint: |
       /bin/bash -c "
-      export HADOOP_CLASSPATH=`/opt/hadoop/bin/hadoop classpath`;
-      /docker-entrypoint.sh jobmanager;
+      jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
       "
-
-    working_dir: /opt/flink
     ports:
-      - "8082:8081"
-      - "6123:6123"
-
+      - "4040:4040"
+      - "8900:8888"
+    depends_on:
+      - minio
+      - hive-metastore
     environment:
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=minio123
@@ -330,42 +204,32 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
       - S3_PATH_STYLE_ACCESS=true
-      - |
-        FLINK_PROPERTIES=
-        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-        fs.s3a.access.key: minio
-        fs.s3a.secret.key: minio123
-        fs.s3a.endpoint: http://minio:9000
-        fs.s3a.path.style.access: true
-        jobmanager.rpc.address: flink-jobmanager
-        state.backend: rocksdb
-        state.backend.incremental: true
-        state.checkpoints.dir: s3a://datalake/flink/cluster-common/checkpoints/
-        state.savepoints.dir: s3a://datalake/flink/cluster-common/savepoints/
 
     volumes:
-      - ./docker/flink/hadoop-core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-      - ./docker/flink/hadoop-hive-site.xml:/opt/flink/conf/hive-site.xml
-      - ./docker/flink/flink-sql-hudi.sh:/opt/flink-client/flink-sql-hudi
-      - ./docker/flink/flink-init-hudi.sql:/opt/flink-client/flink-init-hudi.sql
-      - ./docker/flink/flink-sql-iceberg.sh:/opt/flink-client/flink-sql-iceberg
-      - ./docker/flink/flink-init-iceberg.sql:/opt/flink-client/flink-init-iceberg.sql
+      - ./notebook:/opt/notebook
+      - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+      - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
+      - ./docker/spark/spark-defaults-iceberg.conf:/opt/spark/conf/spark-defaults.conf
     networks:
       - lakehouse_network
 
-  flink-taskmanager:
-    profiles: [ "flink" ]
+  spark-hudi:
+    profiles: [ "spark-hudi" ]
     build:
-      dockerfile: ./docker/flink/Dockerfile-flink1.16
-    image: 1ambda/lakehouse:flink-1.16
-    container_name: flink-taskmanager
-    hostname: flink-taskmanager
+      dockerfile: ./docker/spark/Dockerfile-spark3.3
+    image: 1ambda/lakehouse:spark-3.3
+    container_name: spark-hudi
+    hostname: spark-hudi
     entrypoint: |
       /bin/bash -c "
-      export HADOOP_CLASSPATH=`/opt/hadoop//bin/hadoop classpath`;
-      /docker-entrypoint.sh taskmanager;
+      jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
       "
-    working_dir: /opt/flink
+    ports:
+      - "4041:4040"
+      - "8901:8888"
+    depends_on:
+      - minio
+      - hive-metastore
     environment:
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=minio123
@@ -373,26 +237,69 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
       - S3_PATH_STYLE_ACCESS=true
-      - |
-        FLINK_PROPERTIES=
-        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-        fs.s3a.access.key: minio
-        fs.s3a.secret.key: minio123
-        fs.s3a.endpoint: http://minio:9000
-        fs.s3a.path.style.access: true
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 8
-        parallelism.default: 1
-        state.backend: rocksdb
-        state.backend.incremental: true
-        state.checkpoints.dir: s3a://datalake/flink/cluster-common/checkpoints/
-        state.savepoints.dir: s3a://datalake/flink/cluster-common/savepoints/
+      - HOODIE_ENV_fs_DOT_s3a_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+      - HOODIE_ENV_fs_DOT_s3a_DOT_access_DOT_key=minio;
+      - HOODIE_ENV_fs_DOT_s3a_DOT_awsSecretAccessKey=minio;
+      - HOODIE_ENV_fs_DOT_s3a_DOT_endpoint=http://minio:9000;
+      - HOODIE_ENV_fs_DOT_s3a_DOT_path_DOT_style_DOT_access=true;
+      - HOODIE_ENV_fs_DOT_s3_DOT_impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+      - HOODIE_ENV_fs_DOT_s3_DOT_access_DOT_key=minio;
+      - HOODIE_ENV_fs_DOT_s3_DOT_awsSecretAccessKey=minio;
+      - HOODIE_ENV_fs_DOT_s3_DOT_endpoint=http://minio:9000;
+      - HOODIE_ENV_fs_DOT_s3_DOT_path_DOT_style_DOT_access=true;
+      - HUDI_CONF_DIR=/opt/hudi/conf
 
     volumes:
-        - ./docker/flink/hadoop-core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-        - ./docker/flink/hadoop-hive-site.xml:/opt/flink/conf/hive-site.xml
+      - ./notebook:/opt/notebook
+      - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+      - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
+      - ./docker/spark/spark-defaults-hudi.conf:/opt/spark/conf/spark-defaults.conf
+      - ./docker/spark/hudi-defaults.conf:/opt/hudi/conf/hudi-defaults.conf
+    networks:
+      - lakehouse_network
+
+  spark-delta:
+    profiles: [ "spark-delta" ]
+    build:
+      context: .
+      # Đảm bảo bạn đã lưu nội dung Dockerfile tôi cung cấp ở bước trước vào đường dẫn này
+      dockerfile: ./docker/spark/Dockerfile-delta 
+    image: katinat/lakehouse:spark-delta-3.3
+    container_name: spark-delta
+    hostname: spark-delta
+    # Chạy Jupyter Lab làm môi trường Interactive Development
+    entrypoint: |
+      /bin/bash -c "
+      jupyter lab --notebook-dir=/opt/notebook --ip='*' --NotebookApp.token='' --NotebookApp.password='' --port=8888 --no-browser --allow-root
+      "
+    ports:
+      - "4042:4040"  # Spark UI (Port khác spark-hudi 4041)
+      - "8902:8888"  # Jupyter Lab (Port khác spark-hudi 8901)
     depends_on:
-      - flink-jobmanager
+      - minio
+      - hive-metastore
+    environment:
+      # --- AWS / MinIO Connection Config ---
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PATH_STYLE_ACCESS=true
+      
+      # --- Spark Runtime Config ---
+      - SPARK_MODE=master
+      # Tắt các security feature không cần thiết cho môi trường dev/local để tránh lỗi connection
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    volumes:
+      # Mount thư mục notebook để code không mất khi restart container
+      - ./notebook:/opt/notebook
+      # Mount config Jupyter (nếu bạn dùng chung config với hudi)
+      - ./docker/jupyter/jupyter_server_config.py:/root/.jupyter/jupyter_server_config.py
+      - ./docker/jupyter/themes.jupyterlab-settings:/root/.jupyter/lab/user-settings/@jupyterlab/apputils-extension/themes.jupyterlab-settings
     networks:
       - lakehouse_network
 
